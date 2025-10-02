@@ -13,7 +13,7 @@ def init_connection_pool():
     try:
         connection_pool = psycopg2.pool.SimpleConnectionPool(
             1, 10,
-            DATBASE_URL
+            DATABASE_URL
         )
         print("Database connection pool created")
 

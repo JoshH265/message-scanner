@@ -1,5 +1,22 @@
+# Environment variables (contains secrets!)
 .env
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environment
+venv/
+env/
+ENV/
+
+# IDE
 .vscode/
+.idea/
+
+# Old SQLite database (if you have one)
 bot_data.db

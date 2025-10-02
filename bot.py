@@ -260,7 +260,7 @@ async def on_message(message):
                 # f"**Server:** {message.guild.name if message.guild else 'DM'}\n"
                 f"**Channel:** {message.channel.mention if hasattr(message.channel, 'mention') else 'DM'}\n"
                 f"**Message:** {message.content[:200]}\n\n"
-                f"[Jump to message]({message.jump_url})"
+                f"[Link to message]({message.jump_url})"
             )
             
             await user.send(dm_message)

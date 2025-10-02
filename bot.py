@@ -1,12 +1,3 @@
-# Look up how to host/run a bot for a server
-# Look up how I would allow multiple users to have their own set of words
-    # Will most likely need to use some sort of database to store user ID and the words
-    # Then will need CRUD operations - probably host the DB on docker (and the bot if possible)
-# Have the bot DM the users by default
-# Have a global setting which will ping everyone in the discord
-
-
-
 
 import discord
 from discord.ext import commands
@@ -289,7 +280,7 @@ async def on_message(message):
 
 
 # Command: Add trigger words
-@bot.command(name='watch')
+@bot.command(name='w')
 async def add_word(ctx, *, word: str):
     """Add a word to monitoring list
     Usage: !watch <word>
@@ -309,7 +300,7 @@ async def add_word(ctx, *, word: str):
         await ctx.send("Watching weord: **{word}**")
 
 # Command: Remove a trigger word
-@bot.command(name='unwatch')
+@bot.command(name='uw')
 async def remove_word(ctx, *, word: str):
     """Remove a word from your monitoring list
     Usage: !unwatch <word>
@@ -329,7 +320,7 @@ async def remove_word(ctx, *, word: str):
         await ctx.send(f"You weren't watching **{word}**")
 
 # Command: List your trigger words
-@bot.command(name='mywords')
+@bot.command(name='mw')
 async def list_words(ctx):
     """List all words you're currently monitoring
     Usage: !mywords
@@ -356,22 +347,34 @@ async def toggle_notifs(ctx):
         await ctx.send("🔕 Notifications **disabled**")
 
 # Command: Help
-@bot.command(name='support')
+@bot.command(name='help')
 async def help_command(ctx):
     """Show all available commands"""
-    help_text = """
-**Discord Monitor Bot - Commands**
-
-`!watch <word>` - Add a word to monitor
-`!unwatch <word>` - Remove a word from monitoring
-`!mywords` - List your monitored words
-`!toggle` - Enable/disable notifications
-`!help` - Show this help message
-
-**How it works:**
-When someone mentions one of your watched words, you'll receive a DM with the message details!
-"""
-    await ctx.send(help_text)
+    embed = discord.Embed(
+        title="Discord Monitor Bot - Commands",
+        description="Track keywords across servers you're in!",
+        colour=discord.Colour.blue()
+    )
+    
+    embed.add_field(
+        name="Commands",
+        value=(
+            "`!w <word>` - Add a word to monitor\n"
+            "`!uw<word>` - Remove a word from monitoring\n"
+            "`!mw` - List your monitored words\n"
+            "`!toggle` - Enable/disable notifications\n"
+            "`!help` - Show this help message"
+        ),
+        inline=False
+    )
+    
+    embed.add_field(
+        name="How it works",
+        value="When someone mentions one of your watched words in a server you're in, you'll receive a DM with the message details!",
+        inline=False
+    )
+    
+    await ctx.send(embed=embed)
 
 
 # Run the bot

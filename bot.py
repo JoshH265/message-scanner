@@ -250,6 +250,19 @@ async def on_message(message):
     # Send notifaction for message 
     for user_id, trigger_words in notifications.items():
         try:
+            # Check if the message is in a server
+            if message.guild:
+                member = message.guild.get_member(user_id)
+                if not member:
+                    print(f"  -> User {user_id} not in server {message.guild.name}, skipping notification")
+                    continue
+
+           # Check if the user can see the channel where the message was sent
+            channel_permissions = message.channel.permissions_for(member)
+            if not channel_permissions.read_messages:
+                print(f"  -> User {member.name} cannot see channel {message.channel.name}, skipping notification")
+                continue 
+            
             user = await bot.fetch_user(user_id)
 
             # Create the DM message

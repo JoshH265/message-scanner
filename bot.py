@@ -1,0 +1,378 @@
+# Look up how to host/run a bot for a server
+# Look up how I would allow multiple users to have their own set of words
+    # Will most likely need to use some sort of database to store user ID and the words
+    # Then will need CRUD operations - probably host the DB on docker (and the bot if possible)
+# Have the bot DM the users by default
+# Have a global setting which will ping everyone in the discord
+
+
+
+
+import discord
+from discord.ext import commands
+import psycopg2
+from psycopg2 import pool
+import logging
+import os
+
+# from dotenv import load_dotenv
+import psycopg2.pool
+
+# Set up logging to see what's happening
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('discord')
+
+TOKEN = os.environ.get('BOT_TOKEN')
+DATBASE_URL = os.environ.get('DATABASE_URL')
+# USER_ID = 156815791558361088
+# TRIGGER_WORDS = ['test', 'hello']
+
+print("Starting bot...")
+# Not needed anymore shifting to a database and multiple users
+# print(f"Monitoring for: {TRIGGER_WORDS}")
+# print(f"Will ping user ID: {USER_ID}")
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+# Database connection pool
+connection_pool = None
+
+def init_connection_pool():
+    """Initialise the database connection pool"""
+    global connection_pool
+    try:
+        connection_pool = psycopg2.pool.SimpleConnectionPool(
+            1, 10,
+            DATBASE_URL
+        )
+        print("Database connection pool created")
+
+    except Exception as e:
+        print(f"Error creating connection pool: {e}")
+        raise
+
+def get_db_connection():
+    """Get a connection from the pool"""
+    return connection_pool.getconn()
+
+
+def return_db_connection(conn):
+    """Return connection to the pool"""    
+    connection_pool.putconn(conn)
+
+def init_db():
+    """Initialise the database with required tables"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_triggers (
+                user_id BIGINT,
+                trigger_word TEXT,
+                PRIMARY KEY (user_id, trigger_word)
+            )
+        ''')
+        
+        # Create table for user settings
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_settings (
+                user_id BIGINT PRIMARY KEY,
+                notifications_enabled BOOLEAN DEFAULT TRUE
+            )
+        ''')
+        
+        # Create index for faster lookups
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_trigger_word 
+            ON user_triggers(trigger_word)
+        ''')
+
+        conn.commit()
+        print("Database tables initialised")
+    except Exception as e:
+        print(f"Error initialising BB {e}")
+        conn.rollback()
+        raise
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+###################
+
+def get_user_triggers(user_id):
+    """Get all trigger words for a specific user"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT trigger_word FROM user_triggers WHERE user_id = %s', (user_id,))
+        triggers = [row[0] for row in cursor.fetchall()]
+        return triggers
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+def get_all_users_monitoring(word):
+    """Get all users who are monitoring a specific word"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM user_triggers WHERE trigger_word = %s', (word.lower(),))
+        users = [row[0] for row in cursor.fetchall()]
+        return users
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+def add_trigger_word(user_id, word):
+    """Add a trigger word for a user"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('INSERT INTO user_triggers (user_id, trigger_word) VALUES (%s, %s)',
+                          (user_id, word.lower()))
+            conn.commit()
+            return True
+        except psycopg2.IntegrityError:
+            conn.rollback()
+            return False  # Word already exists
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+def remove_trigger_word(user_id, word):
+    """Remove a trigger word for a user"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM user_triggers WHERE user_id = %s AND trigger_word = %s',
+                      (user_id, word.lower()))
+        removed = cursor.rowcount > 0
+        conn.commit()
+        return removed
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+def is_notifications_enabled(user_id):
+    """Check if notifications are enabled for a user"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('SELECT notifications_enabled FROM user_settings WHERE user_id = %s', (user_id,))
+        result = cursor.fetchone()
+        return result[0] if result else True  # Default to enabled
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+def toggle_notifications(user_id):
+    """Toggle notifications on/off for a user"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Get current state
+        cursor.execute('SELECT notifications_enabled FROM user_settings WHERE user_id = %s', (user_id,))
+        result = cursor.fetchone()
+        
+        if result:
+            new_state = not result[0]
+            cursor.execute('UPDATE user_settings SET notifications_enabled = %s WHERE user_id = %s',
+                          (new_state, user_id))
+        else:
+            new_state = False  # If no record, they want to disable (default is enabled)
+            cursor.execute('INSERT INTO user_settings (user_id, notifications_enabled) VALUES (%s, %s)',
+                          (user_id, new_state))
+        
+        conn.commit()
+        return new_state
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+##########################
+
+
+
+@bot.event
+async def on_ready():
+    """Called when the bot successfully connects to Discord"""
+    init_connection_pool()
+    init_db()
+    print(f'{bot.user} has connected to Discord!')
+    print(f'Bot ID: {bot.user.id}')
+    print(f'Connected to {len(bot.guilds)} server(s)')
+    for guild in bot.guilds:
+        print(f'  - {guild.name} (ID: {guild.id})')
+
+@bot.event
+async def on_message(message):
+    """Called whenever a message is sent in a channel the bot can see"""
+
+    # print(f"Message received from {message.author}: {message.content}")
+
+    # Ignores the bots messages and own users messages
+    if message.author == bot.user:
+        return
+    # if message.author.id == USER_ID:
+    #     return
+
+    print(f"Message received from {message.author}: {message.content}")
+    message_lower = message.content.lower()
+    words_in_message = message_lower.split()
+
+    # Track which users to notify and what words triggered
+    notifications = {}  # {user_id: [list of triggered words]}
+
+    for word in words_in_message:
+        # Clean the word
+        clean_word = ''.join(char for char in word if char.isalnum())
+        if not clean_word:
+            continue
+
+        monitoring_users = get_all_users_monitoring(clean_word)
+        for user_id in monitoring_users:
+            # if user_id == message.author.id:
+            #     continue
+
+            if not is_notifications_enabled(user_id):
+                continue
+            if user_id not in notifications:
+                notifications[user_id] = []
+            notifications[user_id].append(clean_word)
+
+    # Send notifaction for message 
+    for user_id, trigger_words in notifications.items():
+        try:
+            user = await bot.fetch_user(user_id)
+
+            # Create the DM message
+            dm_message = (
+                # f"🔔 **Keyword Alert!**\n\n"
+                # f"**Word(s) detected:** {', '.join(set(trigger_words))}\n"
+                f"**From:** ({message.author.mention})\n" # {message.author.name} <- add this back in if i want it
+                # f"**Server:** {message.guild.name if message.guild else 'DM'}\n"
+                f"**Channel:** {message.channel.mention if hasattr(message.channel, 'mention') else 'DM'}\n"
+                f"**Message:** {message.content[:200]}\n\n"
+                f"[Jump to message]({message.jump_url})"
+            )
+            
+            await user.send(dm_message)
+            print(f"  -> Sent alert to {user.name} for words: {trigger_words}")
+
+
+        except discord.Forbidden:
+            print(f" -> could not DM user {user_id} (DMs disabled)")
+        except Exception as e:
+            print(f" Error sending DM to {user_id}: {e}")
+
+    await bot.process_commands(message)
+
+
+# Command: Add trigger words
+@bot.command(name='watch')
+async def add_word(ctx, *, word: str):
+    """Add a word to monitoring list
+    Usage: !watch <word>
+    """
+    if not word:
+        await ctx.send("Please provide a word")
+        return
+    
+    word = word.split()[0].lower()
+    success = add_trigger_word(ctx.author.id, word)
+
+    if success:
+        await ctx.send(f"Now watching for: {word}")
+        print(f"User {ctx.author.name} added trigger word: {word}")
+
+    else:
+        await ctx.send("Watching weord: **{word}**")
+
+# Command: Remove a trigger word
+@bot.command(name='unwatch')
+async def remove_word(ctx, *, word: str):
+    """Remove a word from your monitoring list
+    Usage: !unwatch <word>
+    """
+    if not word:
+        await ctx.send("Please provide a word to unwatch. Usage: `!unwatch <word>`")
+        return
+    
+    word = word.split()[0].lower()
+    
+    removed = remove_trigger_word(ctx.author.id, word)
+    
+    if removed:
+        await ctx.send(f"✅ No longer watching: **{word}**")
+        print(f"User {ctx.author.name} removed trigger word: {word}")
+    else:
+        await ctx.send(f"You weren't watching **{word}**")
+
+# Command: List your trigger words
+@bot.command(name='mywords')
+async def list_words(ctx):
+    """List all words you're currently monitoring
+    Usage: !mywords
+    """
+    triggers = get_user_triggers(ctx.author.id)
+    
+    if triggers:
+        word_list = ', '.join(f"**{word}**" for word in triggers)
+        await ctx.send(f"📝 You're currently watching: {word_list}")
+    else:
+        await ctx.send("You're not watching any words yet. Use `!watch <word>` to start monitoring!")
+
+# Command: Toggle notifications
+@bot.command(name='toggle')
+async def toggle_notifs(ctx):
+    """Toggle notifications on/off
+    Usage: !toggle
+    """
+    enabled = toggle_notifications(ctx.author.id)
+    
+    if enabled:
+        await ctx.send("🔔 Notifications **enabled**")
+    else:
+        await ctx.send("🔕 Notifications **disabled**")
+
+# Command: Help
+@bot.command(name='support')
+async def help_command(ctx):
+    """Show all available commands"""
+    help_text = """
+**Discord Monitor Bot - Commands**
+
+`!watch <word>` - Add a word to monitor
+`!unwatch <word>` - Remove a word from monitoring
+`!mywords` - List your monitored words
+`!toggle` - Enable/disable notifications
+`!help` - Show this help message
+
+**How it works:**
+When someone mentions one of your watched words, you'll receive a DM with the message details!
+"""
+    await ctx.send(help_text)
+
+
+# Run the bot
+print("\nAttempting to connect to Discord...")
+try:
+    bot.run(TOKEN)
+except discord.LoginFailure:
+    print("\nERROR: Invalid token. Please check your bot token is correct.")
+except Exception as e:
+    print(f"\nERROR: {e}")
+finally:
+    # Close the connection pool when shutting down
+    if connection_pool:
+        connection_pool.closeall()
+        print("Database connections closed")
+
+bot.run(TOKEN)

@@ -91,8 +91,8 @@ async def on_message(message):
         
         for user_id in monitoring_users:
             # Don't notify the person who sent the message
-            if user_id == message.author.id:
-                continue
+            # if user_id == message.author.id:
+            #     continue
                 
             # Check if they have notifications enabled
             if not is_notifications_enabled(user_id):

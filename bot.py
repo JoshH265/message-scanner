@@ -8,7 +8,6 @@ import os
 from database import (
     init_connection_pool,
     init_db,
-    close_connection_pool,
     get_all_users_monitoring,
     is_notifications_enabled
 )
@@ -152,6 +151,3 @@ except discord.LoginFailure:
     print("\nERROR: Invalid token. Please check your bot token is correct.")
 except Exception as e:
     print(f"\nERROR: {e}")
-finally:
-    # Close the connection pool when shutting down
-    close_connection_pool()

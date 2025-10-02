@@ -2,7 +2,7 @@ import psycopg2
 from psycopg2 import pool
 import os
 
-DATBASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 # Database connection pool
 connection_pool = None

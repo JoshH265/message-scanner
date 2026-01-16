@@ -5,11 +5,14 @@ import discord
 from typing import List, Dict, Any, Optional
 from database import get_all_monitored_tokens, add_claim_event, update_last_checked, get_unnotified_claim_events, mark_claim_event_notified
 
-BAGS_API_KEY = "bags_prod_jdN_JWEQpUZOJVEhgZnhN5zYEQ4ApxUAekQTxLP7P0s"
+import os
+BAGS_API_KEY = os.environ.get('BAGS_API_KEY')
 BAGS_API_BASE_URL = "https://public-api-v2.bags.fm/api/v1"
 
 class BagsAPIService:
     def __init__(self):
+        if not BAGS_API_KEY:
+            raise ValueError("BAGS_API_KEY environment variable not set")
         self.api_key = BAGS_API_KEY
         self.base_url = BAGS_API_BASE_URL
         self.headers = {

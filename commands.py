@@ -4,7 +4,10 @@ from database import (
     add_trigger_word,
     remove_trigger_word,
     get_user_triggers,
-    toggle_notifications
+    toggle_notifications,
+    add_token_monitor,
+    remove_token_monitor,
+    get_all_monitored_tokens
 )
 from ui import AddMultipleWordsModal
 
@@ -103,13 +106,30 @@ def setup_commands(bot):
         )
         
         embed.add_field(
-            name="Commands",
+            name="Message Monitoring Commands",
             value=(
                 "`/watch <word>` - Add a single word to monitor\n"
                 "`/watch-multiple` - Add multiple words at once\n"
                 "`/unwatch <word>` - Remove a word from monitoring\n"
                 "`/mywords` - List your monitored words\n"
-                "`/toggle` - Enable/disable notifications\n"
+                "`/toggle` - Enable/disable notifications"
+            ),
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Bags Token Monitoring Commands",
+            value=(
+                "`/monitor <token_mint>` - Monitor a token for fee claim events\n"
+                "`/unmonitor <token_mint>` - Stop monitoring a token\n"
+                "`/list_monitors` - List all monitored tokens"
+            ),
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Other Commands",
+            value=(
                 "`/help` - Show this help message"
             ),
             inline=False
@@ -128,3 +148,101 @@ def setup_commands(bot):
         )
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    ####
+    # Bags Token Monitoring Commands
+    ####
+
+    @bot.tree.command(name="monitor", description="Start monitoring a token for fee claim events")
+    @app_commands.describe(token_mint="The Solana token mint address to monitor")
+    async def monitor_command(interaction: discord.Interaction, token_mint: str):
+        """Start monitoring a token for fee claim events"""
+        
+        token_mint = token_mint.strip()
+        
+        # Basic validation for Solana address format
+        if len(token_mint) < 32 or len(token_mint) > 44:
+            await interaction.response.send_message(
+                "❌ Invalid token mint address. Please provide a valid Solana token mint.", 
+                ephemeral=True
+            )
+            return
+        
+        success = add_token_monitor(token_mint, interaction.user.id)
+        
+        if success:
+            await interaction.response.send_message(
+                f"✅ Now monitoring token `{token_mint}` for fee claim events!\n\n"
+                f"Notifications will be sent to the designated channel when someone claims fees.",
+                ephemeral=True
+            )
+            print(f"User {interaction.user.name} added token monitor: {token_mint}")
+        else:
+            await interaction.response.send_message(
+                f"⚠️ Token `{token_mint}` is already being monitored.", 
+                ephemeral=True
+            )
+
+    ####
+    @bot.tree.command(name="unmonitor", description="Stop monitoring a token for fee claim events")
+    @app_commands.describe(token_mint="The Solana token mint address to stop monitoring")
+    async def unmonitor_command(interaction: discord.Interaction, token_mint: str):
+        """Stop monitoring a token for fee claim events"""
+        
+        token_mint = token_mint.strip()
+        removed = remove_token_monitor(token_mint)
+        
+        if removed:
+            await interaction.response.send_message(
+                f"✅ No longer monitoring token `{token_mint}`.", 
+                ephemeral=True
+            )
+            print(f"User {interaction.user.name} removed token monitor: {token_mint}")
+        else:
+            await interaction.response.send_message(
+                f"❌ Token `{token_mint}` was not being monitored.", 
+                ephemeral=True
+            )
+
+    ####
+    @bot.tree.command(name="list_monitors", description="List all tokens currently being monitored")
+    async def list_monitors_command(interaction: discord.Interaction):
+        """List all tokens currently being monitored"""
+        
+        monitored_tokens = get_all_monitored_tokens()
+        
+        if monitored_tokens:
+            embed = discord.Embed(
+                title="📊 Monitored Tokens",
+                description=f"Currently monitoring **{len(monitored_tokens)}** token(s) for fee claim events:",
+                colour=discord.Colour.blue()
+            )
+            
+            for i, (token_mint, added_by, added_at) in enumerate(monitored_tokens, 1):
+                # Shorten token display for better readability
+                display_mint = f"`{token_mint[:8]}...{token_mint[-8:]}`"
+                
+                try:
+                    user = await bot.fetch_user(added_by)
+                    added_by_name = user.name
+                except:
+                    added_by_name = f"User {added_by}"
+                
+                embed.add_field(
+                    name=f"Token {i}",
+                    value=(
+                        f"**Mint:** {display_mint}\n"
+                        f"**Full Mint:** `{token_mint}`\n"
+                        f"**Added by:** {added_by_name}\n"
+                        f"**Added at:** {added_at.strftime('%Y-%m-%d %H:%M') if added_at else 'Unknown'}"
+                    ),
+                    inline=False
+                )
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                "📭 No tokens are currently being monitored.\n\n"
+                "Use `/monitor <token_mint>` to start monitoring a token for fee claim events!",
+                ephemeral=True
+            )

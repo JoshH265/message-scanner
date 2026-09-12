@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 import logging
 import os
+import asyncio
 
 # Import our modules
 from database import (
@@ -38,16 +39,25 @@ intents.guilds = True
 # Create bot instance
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+async def wait_for_database(max_attempts=10, delay=5):
+    """Retry DB connection until it succeeds so transient startup failures don't kill the bot."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            init_connection_pool()
+            init_db()
+            print("Database ready")
+            return True
+        except Exception as e:
+            print(f"Database not ready (attempt {attempt}/{max_attempts}): {e}")
+            if attempt < max_attempts:
+                await asyncio.sleep(delay)
+    return False
+
 @bot.event
 async def on_ready():
     """Called when the bot successfully connects to Discord"""
-    init_connection_pool()
-    init_db()
-    
-    # Register slash commands
+    # Register and sync slash commands first so they work even if the DB is down
     setup_commands(bot)
-    
-    # Sync slash commands with Discord
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} command(s)")
@@ -59,6 +69,8 @@ async def on_ready():
     print(f'Connected to {len(bot.guilds)} server(s)')
     for guild in bot.guilds:
         print(f'  - {guild.name} (ID: {guild.id})')
+    
+    await wait_for_database()
 
 @bot.event
 async def on_message(message):
@@ -70,33 +82,34 @@ async def on_message(message):
     
     print(f"Message received from {message.author}: {message.content}")
     
-    # Convert message to lowercase for checking
-    message_lower = message.content.lower()
-    
-    # Extract all words from the message
-    words_in_message = message_lower.split()
-    
-    # Track which users to notify and what words triggered
-    notifications = {}  # {user_id: [list of triggered words]}
-    
-    # Check each word in the message
-    for word in words_in_message:
-        # Clean the word (remove punctuation)
-        clean_word = ''.join(char for char in word if char.isalnum())
-        if not clean_word:
-            continue
-            
-        # Find all users monitoring this word
-        monitoring_users = get_all_users_monitoring(clean_word)
+    notifications = {}
+    try:
+        # Convert message to lowercase for checking
+        message_lower = message.content.lower()
         
-        for user_id in monitoring_users:
-            # Check if they have notifications enabled
-            if not is_notifications_enabled(user_id):
+        # Extract all words from the message
+        words_in_message = message_lower.split()
+        
+        # Check each word in the message
+        for word in words_in_message:
+            # Clean the word (remove punctuation)
+            clean_word = ''.join(char for char in word if char.isalnum())
+            if not clean_word:
                 continue
+                
+            # Find all users monitoring this word
+            monitoring_users = get_all_users_monitoring(clean_word)
             
-            if user_id not in notifications:
-                notifications[user_id] = []
-            notifications[user_id].append(clean_word)
+            for user_id in monitoring_users:
+                # Check if they have notifications enabled
+                if not is_notifications_enabled(user_id):
+                    continue
+                
+                if user_id not in notifications:
+                    notifications[user_id] = []
+                notifications[user_id].append(clean_word)
+    except Exception as e:
+        print(f"Error checking triggers for message: {e}")
     
     # Send notifications
     for user_id, triggered_words in notifications.items():

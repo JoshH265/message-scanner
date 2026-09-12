@@ -13,6 +13,7 @@ from database import (
     is_notifications_enabled
 )
 from commands import setup_commands
+from reminders import start_reminder_loop
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -71,6 +72,9 @@ async def on_ready():
         print(f'  - {guild.name} (ID: {guild.id})')
     
     await wait_for_database()
+    
+    # Start the background reminder delivery loop
+    asyncio.create_task(start_reminder_loop(bot))
 
 @bot.event
 async def on_message(message):

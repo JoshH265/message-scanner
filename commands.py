@@ -1,12 +1,35 @@
 import discord
 from discord import app_commands
+import re
+from datetime import datetime, timezone, timedelta
 from database import (
     add_trigger_word,
     remove_trigger_word,
     get_user_triggers,
-    toggle_notifications
+    toggle_notifications,
+    add_reminder,
+    get_user_reminders,
+    cancel_reminder
 )
 from ui import AddMultipleWordsModal
+
+def parse_duration(duration: str):
+    """Parse a duration string like '1h30m', '2h', '45m', '1d 4h' into a timedelta."""
+    duration = duration.strip().lower().replace(' ', '')
+    if not duration:
+        return None
+    pattern = r'^(\d+d)?(\d+h)?(\d+m)?(\d+s)?$'
+    match = re.match(pattern, duration)
+    if not match or not any(match.groups()):
+        return None
+    days = int(match.group(1)[:-1]) if match.group(1) else 0
+    hours = int(match.group(2)[:-1]) if match.group(2) else 0
+    minutes = int(match.group(3)[:-1]) if match.group(3) else 0
+    seconds = int(match.group(4)[:-1]) if match.group(4) else 0
+    total = timedelta(days=days, hours=hours, minutes=minutes, seconds=seconds)
+    if total <= timedelta(0):
+        return None
+    return total
 
 def setup_commands(bot):
     """Register all slash commands with the bot"""
@@ -91,6 +114,79 @@ def setup_commands(bot):
             await interaction.response.send_message("Notifications **disabled**", ephemeral=True)
 
     ####
+    @bot.tree.command(name="remind", description="Set a reminder that will DM you later")
+    @app_commands.describe(
+        duration="How long until the reminder (e.g. 1h, 30m, 2h30m, 1d 4h)",
+        title="A short title for the reminder",
+        note="Optional extra details (optional)"
+    )
+    async def remind_command(interaction: discord.Interaction, duration: str, title: str, note: str = None):
+        """Set a reminder for the user"""
+        delta = parse_duration(duration)
+        if not delta:
+            await interaction.response.send_message(
+                "Invalid duration! Use a format like `1h`, `30m`, `2h30m`, `1d 4h`, or `45s`.",
+                ephemeral=True
+            )
+            return
+        
+        title = title.strip()
+        if not title:
+            await interaction.response.send_message("Please provide a title for the reminder!", ephemeral=True)
+            return
+        
+        remind_at = datetime.now(timezone.utc) + delta
+        reminder_id = add_reminder(interaction.user.id, remind_at, title, note)
+        
+        timestamp = int(remind_at.timestamp())
+        response = f"✅ Reminder **#{reminder_id}** set — **{title}** — <t:{timestamp}:R> (<t:{timestamp}:f>)"
+        if note:
+            response += f"\n*Note: {note}*"
+        await interaction.response.send_message(response, ephemeral=True)
+        print(f"User {interaction.user.name} set reminder #{reminder_id}: {title} in {duration}")
+
+    ####
+    @bot.tree.command(name="reminders", description="List your upcoming reminders")
+    async def reminders_command(interaction: discord.Interaction):
+        """List all upcoming reminders for the user"""
+        reminders = get_user_reminders(interaction.user.id)
+        
+        if not reminders:
+            await interaction.response.send_message(
+                "You have no upcoming reminders. Use `/remind <duration> <title>` to set one!",
+                ephemeral=True
+            )
+            return
+        
+        lines = []
+        for reminder_id, title, note, remind_at in reminders:
+            timestamp = int(remind_at.timestamp())
+            line = f"**#{reminder_id}** — {title} — <t:{timestamp}:R>"
+            if note:
+                line += f"\n    *{note}*"
+            lines.append(line)
+        
+        await interaction.response.send_message(
+            f"**Your reminders ({len(reminders)}):**\n" + "\n".join(lines),
+            ephemeral=True
+        )
+
+    ####
+    @bot.tree.command(name="cancelreminder", description="Cancel one of your reminders")
+    @app_commands.describe(reminder_id="The reminder ID (from /remind or /reminders)")
+    async def cancelreminder_command(interaction: discord.Interaction, reminder_id: int):
+        """Cancel a reminder by ID"""
+        removed = cancel_reminder(interaction.user.id, reminder_id)
+        
+        if removed:
+            await interaction.response.send_message(f"✅ Reminder **#{reminder_id}** cancelled.", ephemeral=True)
+        else:
+            await interaction.response.send_message(
+                f"❌ Couldn't find reminder **#{reminder_id}** (or it's not yours).",
+                ephemeral=True
+            )
+
+    ####
 
     @bot.tree.command(name="help", description="Show information about the bot and its commands")
     async def help_command(interaction: discord.Interaction):
@@ -98,7 +194,7 @@ def setup_commands(bot):
         
         embed = discord.Embed(
             title="Discord Monitor Bot",
-            description="Track keywords across servers you're in!",
+            description="Track keywords across servers and set reminders!",
             colour=discord.Colour.blue()
         )
         
@@ -110,6 +206,16 @@ def setup_commands(bot):
                 "`/unwatch <word>` - Remove a word from monitoring\n"
                 "`/mywords` - List your monitored words\n"
                 "`/toggle` - Enable/disable notifications"
+            ),
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Reminder Commands",
+            value=(
+                "`/remind <duration> <title> [note]` - Set a reminder\n"
+                "`/reminders` - List your upcoming reminders\n"
+                "`/cancelreminder <id>` - Cancel a reminder"
             ),
             inline=False
         )

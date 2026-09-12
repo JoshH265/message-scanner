@@ -62,6 +62,24 @@ def init_db():
             ON user_triggers(trigger_word)
         ''')
         
+        # Create table for reminders
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS reminders (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                remind_at TIMESTAMPTZ NOT NULL,
+                title TEXT NOT NULL,
+                note TEXT,
+                created_at TIMESTAMPTZ DEFAULT now(),
+                delivered BOOLEAN DEFAULT FALSE
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_reminders_due 
+            ON reminders(delivered, remind_at)
+        ''')
+        
         conn.commit()
         print("Database tables initialised")
     except Exception as e:
@@ -191,6 +209,84 @@ def toggle_notifications(user_id):
         
         conn.commit()
         return new_state
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+
+#############
+# Reminder Functions
+
+
+def add_reminder(user_id, remind_at, title, note=None):
+    """Add a reminder for a user"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO reminders (user_id, remind_at, title, note)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        ''', (user_id, remind_at, title, note))
+        reminder_id = cursor.fetchone()[0]
+        conn.commit()
+        return reminder_id
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+def get_due_reminders():
+    """Get all reminders that are due and not yet delivered"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, user_id, title, note, remind_at
+            FROM reminders
+            WHERE delivered = FALSE AND remind_at <= now()
+            ORDER BY remind_at
+        ''')
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+def mark_reminder_delivered(reminder_id):
+    """Mark a reminder as delivered"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE reminders SET delivered = TRUE WHERE id = %s', (reminder_id,))
+        conn.commit()
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+def get_user_reminders(user_id):
+    """Get all upcoming (undelivered) reminders for a user"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, title, note, remind_at
+            FROM reminders
+            WHERE user_id = %s AND delivered = FALSE
+            ORDER BY remind_at
+        ''', (user_id,))
+        return cursor.fetchall()
+    finally:
+        cursor.close()
+        return_db_connection(conn)
+
+def cancel_reminder(user_id, reminder_id):
+    """Cancel a reminder owned by a user"""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM reminders WHERE id = %s AND user_id = %s', (reminder_id, user_id))
+        removed = cursor.rowcount > 0
+        conn.commit()
+        return removed
     finally:
         cursor.close()
         return_db_connection(conn)

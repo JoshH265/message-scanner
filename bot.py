@@ -3,7 +3,6 @@ import discord
 from discord.ext import commands
 import logging
 import os
-import asyncio
 
 # Import our modules
 from database import (
@@ -13,7 +12,6 @@ from database import (
     is_notifications_enabled
 )
 from commands import setup_commands
-from bags_service import start_monitoring_loop
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -22,7 +20,6 @@ logger = logging.getLogger('discord')
 # Get configuration from environment variables
 TOKEN = os.environ.get('BOT_TOKEN')
 DATABASE_URL = os.environ.get('DATABASE_URL')
-NOTIFICATION_CHANNEL_ID = os.environ.get('NOTIFICATION_CHANNEL_ID')  # Channel ID for #bot-pings
 
 print("Starting bot...")
 print(f"DATABASE_URL exists: {DATABASE_URL is not None}")
@@ -62,14 +59,6 @@ async def on_ready():
     print(f'Connected to {len(bot.guilds)} server(s)')
     for guild in bot.guilds:
         print(f'  - {guild.name} (ID: {guild.id})')
-    
-    # Start the Bags API monitoring loop
-    if NOTIFICATION_CHANNEL_ID:
-        notification_channel_id = int(NOTIFICATION_CHANNEL_ID)
-        print(f"Starting Bags API monitoring for channel {notification_channel_id}")
-        asyncio.create_task(start_monitoring_loop(bot, notification_channel_id))
-    else:
-        print("WARNING: NOTIFICATION_CHANNEL_ID not set. Bags monitoring will not start.")
 
 @bot.event
 async def on_message(message):
@@ -101,10 +90,6 @@ async def on_message(message):
         monitoring_users = get_all_users_monitoring(clean_word)
         
         for user_id in monitoring_users:
-            # Don't notify the person who sent the message
-            # if user_id == message.author.id:
-            #     continue
-                
             # Check if they have notifications enabled
             if not is_notifications_enabled(user_id):
                 continue
@@ -135,7 +120,6 @@ async def on_message(message):
             # Create the DM message
             dm_message = (
                 f"**Alert!**\n\n"
-                # f"**Word(s) detected:** {', '.join(set(triggered_words))}\n"
                 f"**From:** {message.author.name} ({message.author.mention})\n"
                 f"**Server:** {message.guild.name if message.guild else 'DM'}\n"
                 f"**Channel:** {message.channel.mention if hasattr(message.channel, 'mention') else 'DM'}\n"

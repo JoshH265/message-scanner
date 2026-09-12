@@ -54,16 +54,23 @@ async def wait_for_database(max_attempts=10, delay=5):
                 await asyncio.sleep(delay)
     return False
 
+commands_registered = False
+reminder_loop_started = False
+
 @bot.event
 async def on_ready():
     """Called when the bot successfully connects to Discord"""
-    # Register and sync slash commands first so they work even if the DB is down
-    setup_commands(bot)
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} command(s)")
-    except Exception as e:
-        print(f"Error syncing commands: {e}")
+    global commands_registered, reminder_loop_started
+    
+    # Register and sync slash commands once, so reconnects don't re-register duplicates
+    if not commands_registered:
+        setup_commands(bot)
+        commands_registered = True
+        try:
+            synced = await bot.tree.sync()
+            print(f"Synced {len(synced)} command(s)")
+        except Exception as e:
+            print(f"Error syncing commands: {e}")
     
     print(f'{bot.user} has connected to Discord!')
     print(f'Bot ID: {bot.user.id}')
@@ -73,8 +80,10 @@ async def on_ready():
     
     await wait_for_database()
     
-    # Start the background reminder delivery loop
-    asyncio.create_task(start_reminder_loop(bot))
+    # Start the background reminder delivery loop only once
+    if not reminder_loop_started:
+        reminder_loop_started = True
+        asyncio.create_task(start_reminder_loop(bot))
 
 @bot.event
 async def on_message(message):
